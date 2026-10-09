@@ -1,44 +1,90 @@
-# Cabcher: Create your Google Maps keys
 
-This takes about 3 minutes. A Google Cloud billing account is required for Google Maps to work. Google may offer free monthly usage, depending on the applicable pricing and eligibility.
+# Cabcher Google Maps Setup
+
+This setup attempts to create Google Maps API keys for your Cabcher installation.
+
+Google Cloud may require billing to be enabled before keys can be created or Maps APIs can be used.
 
 ## Step 1: Run the setup command
 
-Return to your Cabcher installation page and copy the command from the **Guided Setup** section.
+1. Open this tutorial from the Cabcher installation wizard.
+2. Copy the command shown in the installer.
+3. Paste it into the Google Cloud Shell terminal.
+4. Press Enter and wait for the script to finish.
 
-Paste the copied command into the Cloud Shell terminal and press Enter.
+The script attempts to create a Google Cloud project and generate two restricted API keys:
 
-The command contains your installation's website URL and server IP address. You do not need to enter the demo URL or IP manually.
+- Browser key: restricted to your website's HTTP referrer.
+- Server key: restricted to your server's IP address.
 
-If you do not have a command available, run:
+## Step 2: If both keys are created successfully
 
-```bash
-./setup-maps.sh
-```
+Copy the Browser key and Server key shown in the terminal.
 
-Then follow the prompts.
+Enter them into the matching fields in the Cabcher installation wizard.
 
-## Step 2: Choose billing
+Also keep the Project ID displayed by the script. You will need it when enabling billing.
 
-Select an available billing account when prompted.
+**Important:** Creating keys does not guarantee that Google Maps features will work. Billing and API activation may still be required.
 
-If you do not have one, create it at:
+## Step 3: Enable billing for the same project
 
-https://console.cloud.google.com/billing/create
+1. Open Google Cloud Billing:
 
-Then run the setup script again.
+   https://console.cloud.google.com/billing
 
-## Step 3: Copy your keys
+2. Sign in to your Google account.
+3. Create or select an active billing account.
+4. Link that billing account to the exact Project ID printed by the script.
 
-At the end, the terminal displays:
+Do not create a different project for billing. The billing account must be linked to the project containing your Cabcher API keys.
 
-* **Browser key**
-* **Server key**
+## Step 4: Enable the required Google Maps APIs
 
-Copy each key into its matching field in Cabcher, then click **Test keys**.
+After billing is linked, open the Google Cloud API Library:
 
-## Troubleshooting
+https://console.cloud.google.com/apis/library
 
-* **Map shows a watermark or dark map:** Check billing, API enablement, and key restrictions.
-* **REQUEST_DENIED on the server key:** Verify the server key's IP restrictions and enabled APIs.
-* **Keys are not working immediately:** Wait a few minutes and test again.
+Select the project created by the script and enable the APIs required by your Cabcher installation.
+
+The script attempts to enable the APIs automatically. If that step fails, enable them from the Google Cloud Console and review the error shown in Cloud Shell.
+
+## Step 5: Test your installation
+
+Return to Cabcher and test:
+
+- Map display
+- Pickup and drop-off location search
+- Geocoding, if used
+- Route and distance calculations
+- Fare calculations based on distance
+
+If a feature does not work, check that its API is enabled, the correct key is being used, and the key restrictions match the website or server.
+
+## If setup fails before the keys are created
+
+The script prints the Project ID and a retry command when possible.
+
+If Google requires billing:
+
+1. Enable billing for that same project.
+2. Copy the retry command printed by the script.
+3. Run it in the same Cloud Shell repository directory.
+
+The retry command includes the existing Project ID so that the script does not create a different project.
+
+If one key was created before an error occurred, check the project's API Keys page before retrying to avoid generating duplicate keys.
+
+## Security and billing notes
+
+- Keep the Server key private.
+- Never expose the Server key in browser-side JavaScript.
+- Use only the intended website referrers and server IP addresses.
+- Review Google Maps Platform pricing and usage limits.
+- A budget alert is not a hard spending limit.
+
+Google Maps Platform documentation:
+https://developers.google.com/maps/get-started/
+
+Google Cloud Billing:
+https://console.cloud.google.com/billing
