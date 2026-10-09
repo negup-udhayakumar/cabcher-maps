@@ -1,16 +1,12 @@
 
 #!/usr/bin/env bash
-# Cabcher - Google Maps API Key Setup
+# Cabcher - Google Maps API Setup
 #
 # Usage:
 #   ./setup-maps.sh "https://example.com/*" "203.0.113.10"
 #
-# Optional third argument: reuse an existing project.
-#   ./setup-maps.sh "https://example.com/*" "203.0.113.10" "cabcher-maps-123456"
-#
-# Note:
-# Key creation may work without billing, but Maps APIs require
-# the required terms, billing, permissions, and API configuration.
+# Reuse an existing project:
+#   ./setup-maps.sh "https://example.com/*" "203.0.113.10" "YOUR_PROJECT_ID"
 
 set -uo pipefail
 
@@ -18,10 +14,60 @@ REFERRERS="${1:-}"
 SERVER_IP="${2:-}"
 PROJECT_ID="${3:-}"
 
-# --------------------------------------------------
-# 1. Collect and validate inputs
-# --------------------------------------------------
+# Google Maps APIs to enable
+MAPS_APIS=(
+    maps-backend.googleapis.com
+    places-backend.googleapis.com
+    places.googleapis.com
+    directions-backend.googleapis.com
+    distance-matrix-backend.googleapis.com
+    geocoding-backend.googleapis.com
+    routes.googleapis.com
+)
 
+# Save the keys in the user's private Cloud Shell home directory.
+KEY_FILE="$HOME/cabcher-maps-keys.txt"
+
+save_keys() {
+    local temp_file
+    temp_file="$(mktemp "$HOME/.cabcher-maps-keys.XXXXXX")" || return 1
+
+    if ! (
+        umask 077
+        printf 'PROJECT_ID=%s\nBROWSER_KEY=%s\nSERVER_KEY=%s\n' \
+            "$PROJECT_ID" "$BROWSER_KEY" "$SERVER_KEY" > "$temp_file"
+    ); then
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    chmod 600 "$temp_file" || {
+        rm -f "$temp_file"
+        return 1
+    }
+
+    if ! mv -f "$temp_file" "$KEY_FILE"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+
+    chmod 600 "$KEY_FILE"
+}
+
+# Extract keyString from gcloud output without printing the key.
+extract_key() {
+    python3 -c '
+import re
+import sys
+
+output = sys.stdin.read()
+match = re.search(r"""["\x27]keyString["\x27]\s*:\s*["\x27]([^"\x27]+)["\x27]""", output)
+if match:
+    print(match.group(1))
+'
+}
+
+# 1. Get and validate inputs
 if [[ -z "$REFERRERS" ]]; then
     read -r -p "Website referrer (example: https://example.com/*): " REFERRERS
 fi
@@ -42,10 +88,7 @@ if [[ ! "$SERVER_IP" =~ ^[0-9a-fA-F:.,/]+$ ]]; then
     exit 1
 fi
 
-# --------------------------------------------------
-# 2. Create or reuse the Google Cloud project
-# --------------------------------------------------
-
+# 2. Create a new project or reuse an existing one
 if [[ -z "$PROJECT_ID" ]]; then
     PROJECT_ID="cabcher-maps-$(date +%s)-$RANDOM"
 
@@ -59,7 +102,7 @@ if [[ -z "$PROJECT_ID" ]]; then
     fi
 else
     echo ""
-    echo "==> Reusing project: $PROJECT_ID"
+    echo "==> Reusing existing project: $PROJECT_ID"
 
     if ! gcloud projects describe "$PROJECT_ID" >/dev/null 2>&1; then
         echo "ERROR: Project not found or access denied: $PROJECT_ID"
@@ -67,42 +110,30 @@ else
     fi
 fi
 
-echo ""
-echo "Project ID: $PROJECT_ID"
-
 if ! gcloud config set project "$PROJECT_ID"; then
-    echo "ERROR: Could not select project."
+    echo "ERROR: Could not select the project."
     exit 1
 fi
 
-# --------------------------------------------------
-# 3. Enable the API Keys API
-# --------------------------------------------------
+echo ""
+echo "Project ID: $PROJECT_ID"
 
+# 3. Enable the API Keys API
 echo ""
 echo "==> Enabling API Keys API"
 
 if ! gcloud services enable apikeys.googleapis.com \
     --project="$PROJECT_ID"; then
+
     echo ""
     echo "ERROR: Could not enable the API Keys API."
-    echo "Project: $PROJECT_ID"
-    echo "Billing: https://console.cloud.google.com/billing"
-    echo ""
-    echo "Resolve the error, then retry with the same project:"
-    printf './setup-maps.sh %q %q %q\n' \
-        "$REFERRERS" "$SERVER_IP" "$PROJECT_ID"
+    echo "Check project permissions and billing requirements."
     exit 1
 fi
 
-# --------------------------------------------------
 # 4. Create the Browser API key
-# --------------------------------------------------
-
-BROWSER_KEY=""
-
 echo ""
-echo "==> Creating restricted Browser key"
+echo "==> Creating restricted Browser API key"
 
 BROWSER_OUTPUT="$(gcloud services api-keys create \
     --project="$PROJECT_ID" \
@@ -112,33 +143,22 @@ BROWSER_OUTPUT="$(gcloud services api-keys create \
     --api-target=service=places-backend.googleapis.com \
     --api-target=service=places.googleapis.com \
     --api-target=service=geocoding-backend.googleapis.com \
-    --format='value(response.keyString)' 2>&1)"
+    --format=json 2>&1)"
 BROWSER_EXIT=$?
 
-if [[ "$BROWSER_EXIT" -eq 0 ]]; then
-    BROWSER_KEY="$(printf '%s\n' "$BROWSER_OUTPUT" | tail -n 1)"
-fi
+BROWSER_KEY="$(printf '%s' "$BROWSER_OUTPUT" | extract_key)"
 
-if [[ -z "$BROWSER_KEY" ]]; then
+if [[ "$BROWSER_EXIT" -ne 0 || -z "$BROWSER_KEY" ]]; then
+    echo "ERROR: Browser API key creation failed."
     echo "$BROWSER_OUTPUT"
-    echo ""
-    echo "ERROR: Browser key creation failed."
-    echo "Project: $PROJECT_ID"
-    printf './setup-maps.sh %q %q %q\n' \
-        "$REFERRERS" "$SERVER_IP" "$PROJECT_ID"
     exit 1
 fi
 
-echo "Browser key created successfully."
+echo "Browser API key created."
 
-# --------------------------------------------------
 # 5. Create the Server API key
-# --------------------------------------------------
-
-SERVER_KEY=""
-
 echo ""
-echo "==> Creating restricted Server key"
+echo "==> Creating restricted Server API key"
 
 SERVER_OUTPUT="$(gcloud services api-keys create \
     --project="$PROJECT_ID" \
@@ -150,44 +170,44 @@ SERVER_OUTPUT="$(gcloud services api-keys create \
     --api-target=service=places-backend.googleapis.com \
     --api-target=service=places.googleapis.com \
     --api-target=service=routes.googleapis.com \
-    --format='value(response.keyString)' 2>&1)"
+    --format=json 2>&1)"
 SERVER_EXIT=$?
 
-if [[ "$SERVER_EXIT" -eq 0 ]]; then
-    SERVER_KEY="$(printf '%s\n' "$SERVER_OUTPUT" | tail -n 1)"
-fi
+SERVER_KEY="$(printf '%s' "$SERVER_OUTPUT" | extract_key)"
 
-if [[ -z "$SERVER_KEY" ]]; then
+if [[ "$SERVER_EXIT" -ne 0 || -z "$SERVER_KEY" ]]; then
+    echo "ERROR: Server API key creation failed."
     echo "$SERVER_OUTPUT"
     echo ""
-    echo "ERROR: Server key creation failed."
-    echo "Project: $PROJECT_ID"
-    echo "The Browser key may already exist. Check API Keys in Cloud Console."
-    echo "Do not rerun blindly, or duplicate keys may be created."
+    echo "The Browser key was created, but the Server key was not."
+    echo "Check API Keys in Google Cloud Console before retrying."
+    echo "Do not rerun blindly, because that may create duplicate keys."
     exit 1
 fi
 
-echo "Server key created successfully."
+echo "Server API key created."
 
-# --------------------------------------------------
-# 6. Attempt to enable Google Maps APIs
-# --------------------------------------------------
+# 6. Save both keys BEFORE enabling Maps APIs.
+# This means the keys remain available if Maps API activation fails.
+echo ""
+echo "==> Saving keys to a private file"
 
+if ! save_keys; then
+    echo "ERROR: Could not save the keys securely."
+    echo "Please resolve the file permission or disk issue."
+    exit 1
+fi
+
+echo "Keys saved to: $KEY_FILE"
+echo "File permissions restricted to the Cloud Shell user."
+
+# 7. Attempt to enable Google Maps APIs
 echo ""
 echo "==> Attempting to enable Google Maps APIs"
 
-API_OUTPUT="$(gcloud services enable \
-    maps-backend.googleapis.com \
-    places-backend.googleapis.com \
-    places.googleapis.com \
-    directions-backend.googleapis.com \
-    distance-matrix-backend.googleapis.com \
-    geocoding-backend.googleapis.com \
-    routes.googleapis.com \
+API_OUTPUT="$(gcloud services enable "${MAPS_APIS[@]}" \
     --project="$PROJECT_ID" 2>&1)"
 API_EXIT=$?
-
-API_STATUS=""
 
 if [[ "$API_EXIT" -eq 0 ]]; then
     echo "$API_OUTPUT"
@@ -198,49 +218,46 @@ else
     if [[ "$API_OUTPUT" == *"UREQ_TOS_NOT_ACCEPTED"* ]]; then
         API_STATUS="Google Maps Terms of Service must be accepted."
     else
-        API_STATUS="Some Maps APIs could not be enabled. Review the error above."
+        API_STATUS="Maps API activation failed. Review the error above."
     fi
 fi
 
-# --------------------------------------------------
-# 7. Display keys and next steps
-# --------------------------------------------------
-
+# 8. Show the result without printing the actual keys
 echo ""
 echo "=================================================="
 echo " CABCHER GOOGLE MAPS SETUP RESULT"
 echo "=================================================="
-echo "Project ID:"
-echo "$PROJECT_ID"
+echo "Project ID: $PROJECT_ID"
 echo ""
-echo "Browser API key:"
-echo "$BROWSER_KEY"
-echo ""
-echo "Server API key:"
-echo "$SERVER_KEY"
-echo "=================================================="
+echo "Browser key and Server key are saved privately."
+echo "File: $KEY_FILE"
 echo ""
 echo "STATUS:"
 echo "$API_STATUS"
 echo ""
+echo "HOW TO GET YOUR KEYS:"
+echo "Run this command in Cloud Shell:"
+echo "cat ~/cabcher-maps-keys.txt"
+echo ""
 echo "NEXT STEPS:"
 echo ""
-echo "1. Save both keys in the Cabcher installer."
+echo "1. Copy the Browser key and Server key into Cabcher."
 echo ""
-echo "2. If Terms of Service were not accepted, open:"
+echo "2. If the error says UREQ_TOS_NOT_ACCEPTED, open:"
 echo "   https://console.developers.google.com/terms/maps"
 echo ""
-echo "3. Enable billing for this SAME project:"
+echo "3. Accept the Google Maps terms for this project if prompted."
+echo ""
+echo "4. Enable billing for this SAME project:"
 echo "   https://console.cloud.google.com/billing"
 echo ""
-echo "4. Confirm the required Maps APIs are enabled."
+echo "5. After resolving the issue, retry API activation with:"
+printf 'gcloud services enable'
+printf ' %s' "${MAPS_APIS[@]}"
+printf ' --project=%q\n' "$PROJECT_ID"
 echo ""
-echo "5. Test map display, place search, and distance calculations."
+echo "Do not rerun the setup script just to accept terms."
+echo "The retry command above reuses this project and its existing keys."
 echo ""
-echo "If API enablement failed, retry after resolving the error:"
-printf 'gcloud services enable maps-backend.googleapis.com places-backend.googleapis.com places.googleapis.com directions-backend.googleapis.com distance-matrix-backend.googleapis.com geocoding-backend.googleapis.com routes.googleapis.com --project=%q\n' \
-    "$PROJECT_ID"
-echo ""
-echo "Keys being created does not guarantee Maps services will work."
-echo "Billing, accepted terms, API activation, and valid restrictions may be required."
+echo "Keep the Server key private and do not commit the key file."
 echo "=================================================="
