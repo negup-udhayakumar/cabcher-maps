@@ -19,10 +19,14 @@ case "$REFERRERS" in
   http*://*) ;;
   *) echo "ERROR: referrer must start with http:// or https://"; exit 1 ;;
 esac
-if ! [[ "$SERVER_IP" =~ ^[0-9a-fA-F:.,/ ]+$ ]]; then
-  echo "ERROR: server IP looks invalid"; exit 1
-fi
+# Remove spaces before validating the IP addresses
 SERVER_IP="${SERVER_IP// /}"
+
+# Allow IPv4, IPv6, and comma-separated IP addresses
+if [[ ! "$SERVER_IP" =~ ^[0-9a-fA-F:.,/]+$ ]]; then
+  echo "ERROR: server IP looks invalid"
+  exit 1
+fi
 
 # Private IPs never reach Google, so warn
 if [[ "$SERVER_IP" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.) ]]; then
